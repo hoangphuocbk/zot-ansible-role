@@ -1,0 +1,68 @@
+# {{ ansible_managed | default('Ansible managed') }}
+#
+# systemd unit for zot - OCI-native container registry.
+# zot binds its own unprivileged port (>= 1024) as the non-root "zot" user.
+# Reference: https://zotregistry.dev/v2.1.21/install-guides/install-guide-linux/
+[Unit]
+Description=zot - OCI-native container image registry ({{ zot_version_clean }})
+Documentation=https://zotregistry.dev/
+After=network-online.target local-fs.target
+Wants=network-online.target
+ConditionPathExists={{ zot_config_file }}
+ConditionPathExists={{ zot_binary_dest }}
+
+[Service]
+Type=simple
+User={{ zot_user }}
+Group={{ zot_group }}
+WorkingDirectory={{ zot_data_dir }}
+ExecStart={{ zot_binary_dest }} serve {{ zot_config_file }}
+Restart={{ zot_systemd_restart }}
+RestartSec={{ zot_systemd_restart_sec }}
+TimeoutStopSec={{ zot_systemd_timeout_stop_sec }}
+LimitNOFILE={{ zot_systemd_limit_nofile }}
+UMask=0027
+{% if zot_systemd_memory_high | length > 0 %}
+MemoryHigh={{ zot_systemd_memory_high }}
+{% endif %}
+{% if zot_systemd_memory_max | length > 0 %}
+MemoryMax={{ zot_systemd_memory_max }}
+{% endif %}
+{% for key, value in zot_systemd_environment | default({}) | dictsort %}
+Environment="{{ key }}={{ value }}"
+{% endfor %}
+{% if zot_systemd_hardening %}
+# --- Sandboxing / hardening (best practice for a service that needs no privileges) ---
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# AF_NETLINK is allowed for safety, in case a Go/glibc library enumerates routes or interfaces.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths={{ zot_systemd_read_write_paths | join(' ') }}
+{% if zot_systemd_memory_deny_write_execute | bool %}
+MemoryDenyWriteExecute=yes
+{% endif %}
+{% endif %}
+{% for key, value in zot_systemd_extra_options | default({}) | dictsort %}
+{{ key }}={{ value }}
+{% endfor %}
+
+[Install]
+WantedBy=multi-user.target

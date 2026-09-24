@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# Entry point of the `zot` role.
+# Order: preflight -> user/dirs -> binary -> auth -> config -> systemd
+#        -> hardening -> logging -> flush handlers -> verify
+# =============================================================================
+
+- name: Run preflight checks
+  ansible.builtin.import_tasks: preflight.yml
+  tags: [zot, zot:preflight]
+
+- name: Create system account and directories
+  ansible.builtin.import_tasks: user.yml
+  tags: [zot, zot:user]
+
+- name: Install zot binary
+  ansible.builtin.import_tasks: install_binary.yml
+  tags: [zot, zot:install]
+
+- name: Configure local authentication
+  ansible.builtin.import_tasks: auth.yml
+  when: zot_auth_enabled | bool
+  tags: [zot, zot:auth]
+
+- name: Render zot configuration
+  ansible.builtin.import_tasks: configure.yml
+  tags: [zot, zot:config]
+
+- name: Install and start the systemd service
+  ansible.builtin.import_tasks: service.yml
+  tags: [zot, zot:service]
+
+- name: Apply optional OS hardening
+  ansible.builtin.import_tasks: hardening.yml
+  tags: [zot, zot:hardening]
+
+- name: Configure log rotation
+  ansible.builtin.import_tasks: logging.yml
+  tags: [zot, zot:logging]
+
+# Handlers (daemon-reload, restart zot, sysctl) must finish before verification.
+- name: Flush pending handlers before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify the installation
+  ansible.builtin.import_tasks: verify.yml
+  tags: [zot, zot:verify]

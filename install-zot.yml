@@ -1,0 +1,106 @@
+---
+# =============================================================================
+#  Playbook that installs the zot OCI registry (plain HTTP, internal use).
+#
+#  Usage:
+#    ansible-playbook -i inventory.ini install-zot.yml
+#    ansible-playbook -i inventory.ini install-zot.yml --check --diff   # dry-run
+#    ansible-playbook -i inventory.ini install-zot.yml -l zot01 --tags zot:config
+#    ansible-playbook -i inventory.ini install-zot.yml -e zot_target_hosts=zot_servers_test
+#
+#  Admin password: never hard-code it here. Provide `zot_admin_password` through
+#  ansible-vault (see group_vars/all/vault.yml.example) or:
+#    ansible-playbook ... -e zot_admin_password='...'
+# =============================================================================
+- name: Install the zot registry
+  hosts: "{{ zot_target_hosts | default('zot_servers') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    # --- Binary --------------------------------------------------------------
+    zot_version: "2.1.21"
+    zot_binary_variant: full # full | minimal | debug
+    zot_binary_source: url # url | local
+    zot_verify_checksum: true
+
+    # "local" source (air-gapped / no Internet access):
+    #   zot_binary_source: local
+    #   zot_local_binary_path: "{{ playbook_dir }}/files/zot-linux-amd64"
+    #   zot_local_binary_checksum: "sha256:8751cc0daf739634835a3bd8206e3094c84d552e2c462e4a4baf80f40dd92685"
+
+    # Internal mirror instead of GitHub (optional):
+    #   zot_download_url: "https://nexus.internal/repository/raw/zot/zot-linux-amd64"
+    #   zot_checksums_url: "https://nexus.internal/repository/raw/zot/checksums.sha256.txt"
+    #   zot_download_url_headers: {Authorization: "Bearer {{ nexus_token }}"}
+
+    # --- Identity and paths --------------------------------------------------
+    zot_http_address: "0.0.0.0" # tighten to an internal IP if desired
+    zot_http_port: 5000
+    zot_http_realm: "zot-internal"
+    zot_data_dir: /var/lib/zot
+    zot_log_dir: /var/log/zot
+    zot_log_level: info
+    zot_log_output: journald # journald (recommended) | file
+
+    # --- Authentication ------------------------------------------------------
+    zot_auth_enabled: true
+    zot_auth_fail_delay: 5 # brute-force protection
+    zot_auth_users:
+      - name: admin
+        password: "{{ zot_admin_password | default('ChangeMe-Admin-123') }}"
+
+    # --- Storage and tuning --------------------------------------------------
+    zot_storage_dedupe: true
+    zot_storage_gc: true
+    zot_storage_gc_delay: "1h"
+    zot_storage_gc_interval: "6h"
+    zot_storage_commit: false
+
+    # --- Extensions (require the "full" binary) ------------------------------
+    zot_extensions_search: true
+    zot_extensions_search_cve: false # enable to scan CVEs with Trivy
+    zot_extensions_ui: true
+    zot_extensions_metrics: true # Prometheus: /metrics
+    zot_extensions_scrub: true
+    zot_extensions_scrub_interval: "24h"
+    zot_extensions_sync: false # see the mirror example below
+
+    # Pull-through cache / mirror example (uncomment to use):
+    # zot_extensions_sync: true
+    # zot_extensions_sync_registries:
+    #   - urls: ["https://registry-1.docker.io"]
+    #     onDemand: true
+    #     maxRetries: 3
+    #     retryDelay: "5m"
+    #     pollInterval: "6h"
+    #   - urls: ["https://quay.io"]
+    #     onDemand: true
+    #     content:
+    #       - prefix: "quay.io/"
+    #         destination: "/quay/"
+    #         stripPrefix: true
+
+    # --- Optional OS tuning / hardening --------------------------------------
+    zot_manage_sysctl: true # write /etc/sysctl.d/90-<service>.conf
+    zot_manage_firewall: false # true = add ufw rules (only when ufw is active)
+    zot_firewall_allowed_cidrs: ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"]
+
+    # --- systemd -------------------------------------------------------------
+    zot_systemd_limit_nofile: 500000
+    zot_systemd_memory_high: "" # e.g. "4G"
+    zot_systemd_memory_max: "" # e.g. "6G"
+    zot_systemd_hardening: true
+
+  pre_tasks:
+    - name: Warn when the default admin password is still in use
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: the DEFAULT admin password is in use. Set the
+          `zot_admin_password` variable with ansible-vault before using this
+          registry in a real environment.
+      when: zot_admin_password is not defined
+      run_once: true
+
+  roles:
+    - role: zot

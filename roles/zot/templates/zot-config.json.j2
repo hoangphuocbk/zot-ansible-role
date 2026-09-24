@@ -1,0 +1,155 @@
+{#-
+  ============================================================================
+  zot configuration file (JSON).
+  Rendered by the `zot` role. Do NOT edit it directly on the server - change the
+  role variables and run the playbook again.
+
+  How it works:
+    - The dict is built with Jinja; optional keys only appear when enabled.
+    - `to_nice_json` sorts keys, so the output is idempotent (unchanged between
+      runs with the same variables).
+    - `zot_config_extra` is merged (recursive) last and has the highest priority.
+  Reference: https://zotregistry.dev/v2.1.21/admin-guide/admin-configuration/
+  ============================================================================
+-#}
+{%- set storage = {'rootDirectory': zot_data_dir} -%}
+{%- set _ = storage.update({
+      'commit': zot_storage_commit | bool,
+      'dedupe': zot_storage_dedupe | bool,
+      'gc': zot_storage_gc | bool,
+    }) -%}
+{%- if zot_storage_gc | bool -%}
+{%- set _ = storage.update({
+      'gcDelay': zot_storage_gc_delay,
+      'gcInterval': zot_storage_gc_interval,
+    }) -%}
+{%- if zot_storage_gc_time_window | length > 0 -%}
+{%- set _ = storage.update({'gcTimeWindow': zot_storage_gc_time_window}) -%}
+{%- endif -%}
+{%- endif -%}
+{%- if zot_storage_max_repos | int > 0 -%}
+{%- set _ = storage.update({'maxRepos': zot_storage_max_repos | int}) -%}
+{%- endif -%}
+{%- if zot_storage_redirect_blob_url | bool -%}
+{%- set _ = storage.update({'redirectBlobURL': true}) -%}
+{%- endif -%}
+{%- if zot_storage_retention | length > 0 -%}
+{%- set _ = storage.update({'retention': zot_storage_retention}) -%}
+{%- endif -%}
+{%- if zot_storage_storage_driver | length > 0 -%}
+{%- set _ = storage.update({'storageDriver': zot_storage_storage_driver}) -%}
+{%- endif -%}
+
+{%- set http_cfg = {
+      'address': zot_http_address,
+      'port': zot_http_port | string,
+      'realm': zot_http_realm,
+    } -%}
+{%- if zot_http_external_url | length > 0 -%}
+{%- set _ = http_cfg.update({'externalURL': zot_http_external_url}) -%}
+{%- endif -%}
+{%- if zot_http_read_timeout | length > 0 -%}
+{%- set _ = http_cfg.update({'readTimeout': zot_http_read_timeout}) -%}
+{%- endif -%}
+{%- if zot_http_write_timeout | length > 0 -%}
+{%- set _ = http_cfg.update({'writeTimeout': zot_http_write_timeout}) -%}
+{%- endif -%}
+{%- if zot_http_allow_origin | length > 0 -%}
+{%- set _ = http_cfg.update({'allowOrigin': zot_http_allow_origin}) -%}
+{%- endif -%}
+{%- if zot_http_compat | length > 0 -%}
+{%- set _ = http_cfg.update({'compat': zot_http_compat}) -%}
+{%- endif -%}
+{%- if zot_http_ratelimit | length > 0 -%}
+{%- set _ = http_cfg.update({'ratelimit': zot_http_ratelimit}) -%}
+{%- endif -%}
+{%- if zot_http_access_control | length > 0 -%}
+{%- set _ = http_cfg.update({'accessControl': zot_http_access_control}) -%}
+{%- endif -%}
+{%- if zot_auth_enabled | bool -%}
+{%- set auth_cfg = {'htpasswd': {'path': zot_auth_htpasswd_path}} -%}
+{%- if zot_auth_fail_delay | int > 0 -%}
+{%- set _ = auth_cfg.update({'failDelay': zot_auth_fail_delay | int}) -%}
+{%- endif -%}
+{%- if zot_auth_api_key | bool -%}
+{%- set _ = auth_cfg.update({'apikey': true}) -%}
+{%- endif -%}
+{%- set _ = http_cfg.update({'auth': auth_cfg}) -%}
+{%- endif -%}
+
+{%- set log_cfg = {'level': zot_log_level} -%}
+{%- if zot_log_output == 'file' -%}
+{%- set _ = log_cfg.update({'output': zot_log_file}) -%}
+{%- endif -%}
+{%- if zot_log_audit_file | length > 0 -%}
+{%- set _ = log_cfg.update({'audit': zot_log_audit_file}) -%}
+{%- endif -%}
+
+{%- set extensions = {} -%}
+{%- if zot_extensions_search | bool -%}
+{%- set search_cfg = {'enable': true} -%}
+{%- if zot_extensions_search_cve | bool -%}
+{%- set _ = search_cfg.update({'cve': {'updateInterval': zot_extensions_search_cve_update_interval}}) -%}
+{%- endif -%}
+{%- set _ = extensions.update({'search': search_cfg}) -%}
+{%- endif -%}
+{%- if zot_extensions_ui | bool -%}
+{%- set _ = extensions.update({'ui': {'enable': true}}) -%}
+{%- endif -%}
+{%- if zot_extensions_metrics | bool -%}
+{%- set metrics_cfg = {'enable': true} -%}
+{%- if zot_extensions_metrics_path | length > 0 -%}
+{%- set _ = metrics_cfg.update({'prometheus': {'path': zot_extensions_metrics_path}}) -%}
+{%- endif -%}
+{%- set _ = extensions.update({'metrics': metrics_cfg}) -%}
+{%- endif -%}
+{%- if zot_extensions_scrub | bool -%}
+{%- set _ = extensions.update({'scrub': {'enable': true, 'interval': zot_extensions_scrub_interval}}) -%}
+{%- endif -%}
+{%- if zot_extensions_lint | bool -%}
+{%- set lint_cfg = {'enable': true} -%}
+{%- if zot_extensions_lint_mandatory_annotations | length > 0 -%}
+{%- set _ = lint_cfg.update({'mandatoryAnnotations': zot_extensions_lint_mandatory_annotations}) -%}
+{%- endif -%}
+{%- set _ = extensions.update({'lint': lint_cfg}) -%}
+{%- endif -%}
+{%- if zot_extensions_trust | bool -%}
+{%- set _ = extensions.update({'trust': {
+      'enable': true,
+      'cosign': zot_extensions_trust_cosign | bool,
+      'notation': zot_extensions_trust_notation | bool,
+    }}) -%}
+{%- endif -%}
+{%- if zot_extensions_sync | bool -%}
+{%- set sync_cfg = {
+      'enable': true,
+      'registries': zot_extensions_sync_registries,
+    } -%}
+{%- if zot_extensions_sync_credentials_file | length > 0 -%}
+{%- set _ = sync_cfg.update({'credentialsFile': zot_extensions_sync_credentials_file}) -%}
+{%- endif -%}
+{%- if zot_extensions_sync_download_dir | length > 0 -%}
+{%- set _ = sync_cfg.update({'downloadDir': zot_extensions_sync_download_dir}) -%}
+{%- endif -%}
+{%- set _ = extensions.update({'sync': sync_cfg}) -%}
+{%- endif -%}
+{%- if zot_extensions_events | bool -%}
+{%- set _ = extensions.update({'events': {'enable': true, 'sinks': zot_extensions_events_sinks}}) -%}
+{%- endif -%}
+{%- if zot_extensions_extra | length > 0 -%}
+{%- set _ = extensions.update(zot_extensions_extra) -%}
+{%- endif -%}
+
+{%- set config = {
+      'distSpecVersion': zot_distribution_spec_version,
+      'storage': storage,
+      'http': http_cfg,
+      'log': log_cfg,
+    } -%}
+{%- if zot_scheduler_num_workers | int > 0 -%}
+{%- set _ = config.update({'scheduler': {'numWorkers': zot_scheduler_num_workers | int}}) -%}
+{%- endif -%}
+{%- if extensions | length > 0 -%}
+{%- set _ = config.update({'extensions': extensions}) -%}
+{%- endif -%}
+{{ config | combine(zot_config_extra | default({}, true), recursive=True) | to_nice_json }}

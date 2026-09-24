@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# systemd unit and service lifecycle.
+# zot binds its own unprivileged port (>= 1024) as the non-root "zot" user, so a
+# single service unit is all that is needed.
+# =============================================================================
+
+- name: Install the zot systemd service unit
+  ansible.builtin.template:
+    src: zot.service.j2
+    dest: "{{ zot_service_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify:
+    - Reload systemd daemon
+    - Restart zot
+
+- name: Enable and start zot
+  ansible.builtin.systemd:
+    name: "{{ zot_service_name }}"
+    enabled: "{{ zot_service_enabled | bool }}"
+    state: "{{ zot_service_state }}"
+    daemon_reload: true

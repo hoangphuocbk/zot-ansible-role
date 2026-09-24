@@ -1,0 +1,21 @@
+---
+# Handlers run once at the end of the play (or when meta: flush_handlers is hit).
+# The role flushes handlers before the health check so the service is already
+# running with the new configuration.
+# Handlers execute in the order they are defined here: reload first, restart last.
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Apply zot sysctl settings
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: false
+
+- name: Restart zot
+  ansible.builtin.systemd:
+    name: "{{ zot_service_name }}"
+    state: restarted
+    daemon_reload: true
+  when: zot_service_state == 'started'

@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# Log rotation. Only needed when zot_log_output == "file"; with journald,
+# systemd-journald handles rotation on its own.
+# =============================================================================
+
+- name: Install the logrotate configuration for zot
+  ansible.builtin.template:
+    src: zot.logrotate.j2
+    dest: "{{ zot_logrotate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - zot_log_output == 'file'
+    - zot_manage_logrotate | bool
+
+- name: Remove the logrotate configuration when file logging is disabled
+  ansible.builtin.file:
+    path: "{{ zot_logrotate_file }}"
+    state: absent
+  when: not (zot_log_output == 'file' and zot_manage_logrotate | bool)

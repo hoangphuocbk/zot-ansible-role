@@ -1,0 +1,77 @@
+---
+# =============================================================================
+# Optional hardening/tuning. Disabled by default so the role does not change
+# anything outside of the zot installation. Enable it when you want the role to
+# manage sysctl/firewall settings.
+# =============================================================================
+
+- name: Apply sysctl tuning
+  when: zot_manage_sysctl | bool
+  block:
+    - name: Write the zot sysctl tuning file
+      ansible.builtin.copy:
+        content: |
+          # {{ ansible_managed | default('Ansible managed') }} - zot registry tuning
+          {% for key, value in zot_sysctl_settings | dictsort %}
+          {{ key }} = {{ value }}
+          {% endfor %}
+        dest: "{{ zot_sysctl_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Apply zot sysctl settings
+
+    - name: Warn that sysctl changes need a reboot to be fully effective
+      ansible.builtin.debug:
+        msg: >-
+          Wrote {{ zot_sysctl_file }}. The values are applied immediately by
+          `sysctl --system`; a reboot is recommended to make sure every parameter
+          is in effect.
+      when: zot_show_summary | bool
+
+- name: Configure the host firewall
+  when: zot_manage_firewall | bool
+  block:
+    - name: Detect whether ufw is available and active
+      ansible.builtin.command:
+        cmd: ufw status
+      register: zot_ufw_status
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Warn when ufw is not managing the firewall
+      ansible.builtin.debug:
+        msg: >-
+          ufw is unavailable or not active -> the role does NOT add any rule.
+          Open port {{ zot_http_port }}/tcp manually on the firewall in use
+          (nftables/iptables or a cloud security group).
+      when: "'Status: active' not in (zot_ufw_status.stdout | default(''))"
+
+    - name: Manage ufw rules for zot
+      when: "'Status: active' in (zot_ufw_status.stdout | default(''))"
+      block:
+        - name: Allow the registry port from internal networks
+          community.general.ufw:
+            rule: allow
+            port: "{{ zot_http_port }}"
+            proto: tcp
+            from_ip: "{{ item }}"
+            comment: "zot registry"
+          loop: "{{ zot_firewall_allowed_cidrs }}"
+          loop_control:
+            label: "{{ item }}"
+
+        - name: Apply extra ufw rules
+          community.general.ufw: "{{ item }}"
+          loop: "{{ zot_firewall_extra_rules }}"
+          loop_control:
+            label: "{{ item | default('') }}"
+      rescue:
+        - name: Explain how to fix a missing community.general collection
+          ansible.builtin.fail:
+            msg: >-
+              Could not call the community.general.ufw module. Install the
+              collection with `ansible-galaxy collection install -r requirements.yml`,
+              or set `zot_manage_firewall: false` and manage the firewall yourself.
+              Original error: {{ ansible_failed_result.msg | default('unknown') }}

@@ -1,0 +1,29 @@
+---
+galaxy_info:
+  role_name: zot
+  namespace: local
+  author: Platform Team
+  description: >-
+    Install and configure the zot OCI-native container registry on Ubuntu 24.04
+    (VM or bare metal) from the upstream binary, managed by systemd.
+  company: ""
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+  galaxy_tags:
+    - registry
+    - oci
+    - containers
+    - docker
+    - systemd
+    - ubuntu
+
+dependencies: []
+
+# community.general is only required for the optional htpasswd and ufw features.
+# It is intentionally NOT declared as a hard dependency so the role stays usable
+# with ansible-core alone. See requirements.yml at the repository root.
+collections: []

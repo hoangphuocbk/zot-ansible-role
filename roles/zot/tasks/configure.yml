@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# Render config.json and validate it with `zot verify` before writing it to disk.
+# zot hot-reloads some settings when the file changes, but this role restarts the
+# service after a config change so the resulting state is always deterministic.
+# =============================================================================
+
+- name: Render the zot configuration file
+  ansible.builtin.template:
+    src: zot-config.json.j2
+    dest: "{{ zot_config_file }}"
+    owner: root
+    group: "{{ zot_group }}"
+    mode: "{{ zot_config_mode }}"
+    backup: "{{ zot_config_backup }}"
+    validate: "{{ zot_validate_config_on_write | bool | ternary(zot_binary_dest ~ ' verify %s', omit) }}"
+  notify: Restart zot
+
+- name: Check the rendered configuration file permissions
+  ansible.builtin.stat:
+    path: "{{ zot_config_file }}"
+  register: zot_config_stat
+  check_mode: false
+
+- name: Fail when the service account cannot read the configuration
+  ansible.builtin.assert:
+    that:
+      - zot_config_stat.stat.exists
+      - zot_config_stat.stat.pw_name == 'root'
+      - zot_config_stat.stat.gr_name == zot_group
+      - zot_config_stat.stat.mode == ('%04o' | format(zot_config_mode | int))
+    fail_msg: >-
+      {{ zot_config_file }} must be root:{{ zot_group }} with mode
+      {{ zot_config_mode }} so the service running as "{{ zot_user }}" can read
+      it. Current: {{ zot_config_stat.stat.pw_name | default('?') }}:{{
+      zot_config_stat.stat.gr_name | default('?') }} mode {{
+      zot_config_stat.stat.mode | default('?') }}.
+    quiet: true
+
+- name: Validate the configuration with `zot verify`
+  ansible.builtin.command:
+    cmd: "{{ zot_binary_dest }} verify {{ zot_config_file }}"
+  register: zot_config_verify
+  changed_when: false
+  check_mode: false
+
+- name: Show the configuration validation result
+  ansible.builtin.debug:
+    msg: "`zot verify` OK for {{ zot_config_file }}"
+  when: zot_show_summary | bool

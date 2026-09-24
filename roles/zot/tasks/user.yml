@@ -1,0 +1,59 @@
+---
+# =============================================================================
+# System account and directories.
+# Principle: run as a non-login user with the least privileges required.
+# =============================================================================
+
+- name: Ensure the zot group exists
+  ansible.builtin.group:
+    name: "{{ zot_group }}"
+    system: true
+    state: present
+
+- name: Ensure the zot system user exists
+  ansible.builtin.user:
+    name: "{{ zot_user }}"
+    group: "{{ zot_group }}"
+    comment: "{{ zot_user_comment }}"
+    home: "{{ zot_user_home }}"
+    shell: "{{ zot_user_shell }}"
+    create_home: false
+    system: true
+    password_lock: true
+    state: present
+
+- name: Ensure the binary directory exists
+  ansible.builtin.file:
+    path: "{{ zot_binary_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure the configuration directory exists
+  ansible.builtin.file:
+    path: "{{ zot_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ zot_group }}"
+    mode: "0750"
+
+# Data dir + the directories holding the log/audit files (the log path may be
+# configured outside of zot_log_dir).
+- name: Ensure the data and log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ zot_user }}"
+    group: "{{ zot_group }}"
+    mode: "0750"
+  loop: "{{ zot_runtime_directories }}"
+  loop_control:
+    label: "{{ item }}"
+  vars:
+    zot_runtime_directories: >-
+      {{ ([zot_data_dir, zot_log_dir]
+          + ([zot_log_file | dirname] if zot_log_output == 'file' else [])
+          + ([zot_log_audit_file | dirname] if (zot_log_audit_file | length > 0) else [])
+          + ([zot_extensions_sync_download_dir] if (zot_extensions_sync_download_dir | length > 0) else [])
+         ) | unique | list }}

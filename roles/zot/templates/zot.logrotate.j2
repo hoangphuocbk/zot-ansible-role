@@ -1,0 +1,16 @@
+# {{ ansible_managed | default('Ansible managed') }}
+#
+# zot keeps its log file descriptors open and does not reopen them on a signal,
+# so copytruncate is used (no postrotate, which would send SIGHUP and kill the
+# process).
+{{ zot_log_file }}{% if zot_log_audit_file | length > 0 %} {{ zot_log_audit_file }}{% endif %} {
+    {{ zot_logrotate_frequency }}
+    rotate {{ zot_logrotate_days }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 {{ zot_user }} {{ zot_group }}
+    su {{ zot_user }} {{ zot_group }}
+}

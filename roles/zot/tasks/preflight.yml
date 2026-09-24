@@ -1,0 +1,142 @@
+---
+# =============================================================================
+# Preflight: validate the inputs before touching the system.
+# Fail early with an actionable message instead of failing halfway through.
+# =============================================================================
+
+- name: Check that the target is a supported operating system
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version is version(zot_minimum_os_version, '>=')
+    fail_msg: >-
+      This role only supports Ubuntu >= {{ zot_minimum_os_version }} (found:
+      {{ ansible_distribution }} {{ ansible_distribution_version }}).
+      Set `zot_skip_os_check: true` if you really want to continue.
+    success_msg: "OS OK: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_architecture }})"
+    quiet: true
+  when: not (zot_skip_os_check | bool)
+
+- name: Validate role variables
+  ansible.builtin.assert:
+    that:
+      - zot_binary_source in zot_supported_binary_sources
+      - zot_binary_variant in zot_supported_binary_variants
+      - zot_log_level in zot_supported_log_levels
+      - zot_log_output in zot_supported_log_outputs
+      - zot_http_port | int > 0 and zot_http_port | int < 65536
+      - zot_data_dir.startswith('/')
+      - zot_log_dir.startswith('/')
+      - zot_config_dir.startswith('/')
+      - zot_binary_dest.startswith('/')
+      - zot_user | length > 0
+      - zot_group | length > 0
+      - zot_service_name | length > 0
+      - zot_auth_users | selectattr('name', 'defined') | list | length == zot_auth_users | length
+    fail_msg: >-
+      Invalid role variables (see the assertion above for details).
+      Check defaults/main.yml of the role.
+    quiet: true
+
+- name: Check that the zot binary exists on the control node (source=local)
+  ansible.builtin.stat:
+    path: "{{ zot_local_binary_path }}"
+  register: zot_local_binary_stat
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when:
+    - zot_binary_source == 'local'
+    - zot_local_binary_path | length > 0
+
+- name: Validate the local binary path (source=local)
+  ansible.builtin.assert:
+    that:
+      - zot_local_binary_path | length > 0
+      - zot_local_binary_stat.stat.exists | default(false)
+      - zot_local_binary_stat.stat.isreg | default(false)
+    fail_msg: >-
+      `zot_binary_source: local` requires `zot_local_binary_path` to point to an
+      existing file on the Ansible controller (current value:
+      "{{ zot_local_binary_path }}").
+    success_msg: "Local binary OK: {{ zot_local_binary_path }}"
+    quiet: true
+  when: zot_binary_source == 'local'
+
+- name: Check that the pre-built htpasswd file exists on the control node
+  ansible.builtin.stat:
+    path: "{{ zot_auth_htpasswd_local_file }}"
+  register: zot_auth_htpasswd_local_stat
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when:
+    - zot_auth_enabled | bool
+    - zot_auth_htpasswd_local_file | length > 0
+
+- name: Validate authentication configuration
+  ansible.builtin.assert:
+    that:
+      - (zot_auth_users | length > 0) or (zot_auth_htpasswd_local_file | length > 0)
+    fail_msg: >-
+      `zot_auth_enabled: true` but no user is configured. Either declare
+      `zot_auth_users` (keep passwords in ansible-vault) or point
+      `zot_auth_htpasswd_local_file` to a pre-built htpasswd file.
+    quiet: true
+  when: zot_auth_enabled | bool
+
+- name: Validate the pre-built htpasswd file (source=local file)
+  ansible.builtin.assert:
+    that:
+      - zot_auth_htpasswd_local_stat.stat.exists | default(false)
+      - zot_auth_htpasswd_local_stat.stat.isreg | default(false)
+    fail_msg: >-
+      `zot_auth_htpasswd_local_file` does not exist on the controller:
+      "{{ zot_auth_htpasswd_local_file }}".
+    quiet: true
+  when:
+    - zot_auth_enabled | bool
+    - zot_auth_htpasswd_local_file | length > 0
+
+- name: Validate registry synchronization configuration
+  ansible.builtin.assert:
+    that:
+      - zot_extensions_sync_registries | length > 0
+    fail_msg: >-
+      `zot_extensions_sync: true` requires at least one entry in
+      `zot_extensions_sync_registries` (see the examples in README.md).
+    quiet: true
+  when: zot_extensions_sync | bool
+
+- name: Validate checksum format
+  ansible.builtin.assert:
+    that:
+      - item is match('^(sha(256|512):)?[0-9a-fA-F]{64,128}$')
+    fail_msg: >-
+      Checksum "{{ item }}" is invalid. Use "sha256:<hex>" or "<hex>".
+    quiet: true
+  loop:
+    - "{{ zot_binary_checksum }}"
+    - "{{ zot_local_binary_checksum }}"
+  when: item | length > 0
+
+- name: Warn when a minimal binary is combined with extensions
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: zot_binary_variant=minimal - the whole `extensions` section of the
+      configuration is ignored by zot. Use `zot_binary_variant: full` if you need
+      search/sync/scrub/metrics/ui/trust/lint.
+  when:
+    - zot_binary_variant == 'minimal'
+    - zot_extensions_requested | bool
+
+- name: Warn when the registry listens on all interfaces without authentication
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: zot_http_address={{ zot_http_address }} and authentication is
+      DISABLED - anyone who can reach port {{ zot_http_port }} can push, pull and
+      delete images. Enable `zot_auth_enabled: true` and/or restrict access with a
+      firewall or reverse proxy.
+  when:
+    - not (zot_auth_enabled | bool)
+    - zot_http_address in ['0.0.0.0', '::', '[::]']

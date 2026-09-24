@@ -1,0 +1,184 @@
+---
+# =============================================================================
+# Install the zot binary.
+#   - zot_binary_source=url   : download from GitHub Releases or an internal
+#                               mirror, SHA256 verification required (default).
+#   - zot_binary_source=local : copy from the Ansible controller (air-gapped).
+# Both paths are idempotent: the file is only replaced when its content/checksum
+# differs.
+# =============================================================================
+
+- name: Check whether the zot binary is already present
+  ansible.builtin.stat:
+    path: "{{ zot_binary_dest }}"
+  register: zot_binary_stat
+  check_mode: false
+
+- name: Read the currently installed zot version
+  ansible.builtin.command:
+    cmd: "{{ zot_binary_dest }} --version"
+  register: zot_version_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: zot_binary_stat.stat.exists | default(false)
+
+- name: Report the installed versus requested version
+  ansible.builtin.debug:
+    msg: >-
+      zot binary: installed {{ zot_installed_commit }} ->
+      requested v{{ zot_version_clean }} (variant={{ zot_binary_variant }}, arch={{ zot_arch }})
+  vars:
+    zot_installed_commit: >-
+      {{ zot_version_probe.stdout | default('') |
+         regex_findall('"commit":"([^"]+)"') | first | default('not installed', true) }}
+  when:
+    - zot_binary_stat.stat.exists | default(false)
+    - zot_show_summary | bool
+
+# -----------------------------------------------------------------------------
+# Source: URL
+# -----------------------------------------------------------------------------
+- name: Install the zot binary from a URL
+  when: zot_binary_source == 'url'
+  block:
+    - name: Fetch the upstream checksum manifest (control node)
+      ansible.builtin.uri:
+        url: "{{ zot_checksums_url }}"
+        return_content: true
+        timeout: "{{ zot_download_timeout }}"
+      register: zot_checksums_fetch
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when:
+        - zot_verify_checksum | bool
+        - zot_binary_checksum | length == 0
+
+    - name: Resolve the expected checksum
+      ansible.builtin.set_fact:
+        zot_resolved_checksum: >-
+          {{ zot_binary_checksum_normalized if (zot_binary_checksum | length > 0)
+             else zot_auto_checksum }}
+      vars:
+        # Find the "<sha256> *<asset>" line in the release checksums.sha256.txt.
+        # Notes: regex_findall returns [] when there is no match, and a Jinja
+        # if/else expression is lazy while the ternary filter evaluates both
+        # branches (which would break on an empty list).
+        zot_checksum_matches: >-
+          {{ zot_checksums_fetch.content | default('', true)
+             | regex_findall('(?m)^([0-9a-fA-F]{64})\s+\*?' ~ zot_binary_asset_name ~ '$') }}
+        zot_auto_checksum: >-
+          {{ ('sha256:' ~ zot_checksum_matches[0]) if (zot_checksum_matches | length > 0) else '' }}
+
+    - name: Fail when checksum verification is impossible
+      ansible.builtin.fail:
+        msg: |
+          Could not obtain a checksum for "{{ zot_binary_asset_name }}" from
+          {{ zot_checksums_url }}.
+          Choose one of the following:
+            1. Set `zot_binary_checksum: "sha256:<hex>"`.
+            2. Point `zot_checksums_url` to an internal mirror serving checksums.
+            3. Disable verification: `zot_verify_checksum: false` (NOT recommended).
+      when:
+        - zot_verify_checksum | bool
+        - zot_resolved_checksum | length == 0
+
+    - name: Decide whether the download must run
+      ansible.builtin.set_fact:
+        zot_download_force: >-
+          {{ (zot_force_update | bool)
+             or (not (zot_binary_stat.stat.exists | default(false)))
+             or ((zot_verify_checksum | bool) and (zot_resolved_checksum | length > 0)) }}
+
+    - name: Remove the existing binary when zot_force_update is enabled
+      ansible.builtin.file:
+        path: "{{ zot_binary_dest }}"
+        state: absent
+      when: zot_force_update | bool
+
+    - name: Download the zot binary
+      ansible.builtin.get_url:
+        url: "{{ zot_download_url }}"
+        dest: "{{ zot_binary_dest }}"
+        checksum: "{{ zot_resolved_checksum | default(omit, true) }}"
+        headers: "{{ zot_download_url_headers }}"
+        owner: "{{ zot_binary_owner }}"
+        group: "{{ zot_binary_group }}"
+        mode: "{{ zot_binary_mode }}"
+        backup: true
+        force: "{{ zot_download_force | bool }}"
+        timeout: "{{ zot_download_timeout }}"
+      register: zot_binary_download
+      retries: "{{ zot_download_retries }}"
+      delay: "{{ zot_download_delay }}"
+      until: zot_binary_download is succeeded
+      notify: Restart zot
+
+# -----------------------------------------------------------------------------
+# Source: file on the Ansible controller
+# -----------------------------------------------------------------------------
+- name: Install the zot binary from the control node
+  when: zot_binary_source == 'local'
+  block:
+    - name: Verify the checksum of the local binary (control node)
+      ansible.builtin.command:
+        cmd: "sha256sum {{ zot_local_binary_path }}"
+      register: zot_local_binary_sha256
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      when: zot_local_binary_checksum | length > 0
+
+    - name: Validate the local binary checksum
+      ansible.builtin.assert:
+        that:
+          - (zot_local_binary_sha256.stdout | default('unknown')).split()[0] | lower == zot_local_binary_checksum_normalized.split(':')[-1] | lower
+        fail_msg: >-
+          The local file checksum does not match. Expected
+          {{ zot_local_binary_checksum_normalized }}, got
+          {{ (zot_local_binary_sha256.stdout | default('unknown')).split()[0] | default('unknown') }}.
+        quiet: true
+      when: zot_local_binary_checksum | length > 0
+
+    - name: Copy the zot binary to the target
+      ansible.builtin.copy:
+        src: "{{ zot_local_binary_path }}"
+        dest: "{{ zot_binary_dest }}"
+        owner: "{{ zot_binary_owner }}"
+        group: "{{ zot_binary_group }}"
+        mode: "{{ zot_binary_mode }}"
+        backup: true
+        force: true
+      notify: Restart zot
+
+# -----------------------------------------------------------------------------
+# Enforce ownership/permissions even when the binary already existed
+# -----------------------------------------------------------------------------
+- name: Ensure binary ownership and permissions
+  ansible.builtin.file:
+    path: "{{ zot_binary_dest }}"
+    state: file
+    owner: "{{ zot_binary_owner }}"
+    group: "{{ zot_binary_group }}"
+    mode: "{{ zot_binary_mode }}"
+
+- name: Verify the binary runs
+  ansible.builtin.command:
+    cmd: "{{ zot_binary_dest }} --version"
+  register: zot_binary_version_check
+  changed_when: false
+  check_mode: false
+
+- name: Show the installed zot version
+  ansible.builtin.debug:
+    msg: >-
+      Installed: {{ zot_binary_version_check.stdout | default('') |
+                     regex_findall('"commit":"([^"]+)"') | first | default('unknown', true) }}
+      (binary-type: {{ zot_binary_version_check.stdout | default('') |
+                       regex_findall('"binary-type":"([^"]+)"') | first | default('unknown', true) }})
+  when: zot_show_summary | bool

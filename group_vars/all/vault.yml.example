@@ -1,0 +1,17 @@
+# =============================================================================
+#  Example vault file for the zot role.
+#
+#  Usage:
+#    cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#    vi group_vars/all/vault.yml          # set the real password
+#    ansible-vault encrypt group_vars/all/vault.yml
+#
+#  Then run the playbook with --ask-vault-pass (or --vault-password-file).
+#  group_vars/all/vault.yml is already listed in .gitignore.
+# =============================================================================
+
+# Password for the zot admin user (used by install-zot.yml).
+zot_admin_password: "Change-This-Password-Now"
+
+# Extra users for CI/CD, for example:
+# zot_ci_password: "Change-This-CI-Password"

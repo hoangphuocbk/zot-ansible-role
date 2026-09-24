@@ -1,0 +1,20 @@
+# Ansible
+*.retry
+ansible.log
+.cache/
+.tmp/
+
+# Vault / secrets - never commit these
+group_vars/all/vault.yml
+host_vars/*/vault.yml
+*.vault
+
+# Pre-downloaded binary (used by zot_binary_source=local)
+files/zot-linux-*
+files/checksums.sha256.txt
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

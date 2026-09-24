@@ -1,0 +1,108 @@
+---
+# =============================================================================
+# Local authentication with htpasswd (basic auth).
+# Recommended: keep passwords in ansible-vault, for example
+#   zot_auth_users:
+#     - {name: admin, password: "{{ vault_zot_admin_password }}"}
+# =============================================================================
+
+- name: Check whether passlib is already available
+  ansible.builtin.command:
+    cmd: /usr/bin/python3 -c "import passlib"
+  register: zot_passlib_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: zot_auth_users | length > 0
+
+# Only install when it is really missing - avoids an apt/Internet dependency on
+# air-gapped targets.
+- name: Install python3-passlib (required for htpasswd)
+  ansible.builtin.apt:
+    name: python3-passlib
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - zot_auth_users | length > 0
+    - zot_passlib_check.rc | default(0) != 0
+
+- name: Manage htpasswd entries
+  block:
+    - name: Add or update htpasswd entries
+      community.general.htpasswd:
+        path: "{{ zot_auth_htpasswd_path }}"
+        name: "{{ item.name }}"
+        password: "{{ item.password }}"
+        hash_scheme: "{{ zot_auth_htpasswd_hash_scheme }}"
+        owner: root
+        group: "{{ zot_group }}"
+        mode: "{{ zot_auth_htpasswd_mode }}"
+        create: true
+        state: present
+      loop: "{{ zot_auth_users }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: "{{ zot_auth_no_log | bool }}"
+      notify: Restart zot
+  rescue:
+    - name: Explain how to fix a missing community.general collection
+      ansible.builtin.fail:
+        msg: >-
+          Could not manage htpasswd entries. Common causes:
+          (1) the community.general collection is missing ->
+          `ansible-galaxy collection install -r requirements.yml`;
+          (2) python3-passlib is missing on the target;
+          (3) hash_scheme "{{ zot_auth_htpasswd_hash_scheme }}" is not supported by passlib.
+          Original error: {{ ansible_failed_result.msg | default(ansible_failed_result | default('unknown')) }}
+
+- name: Read the htpasswd file to purge undeclared users
+  ansible.builtin.slurp:
+    src: "{{ zot_auth_htpasswd_path }}"
+  register: zot_htpasswd_slurp
+  when:
+    - zot_auth_purge_other_users | bool
+    - zot_auth_users | length > 0
+
+- name: Purge htpasswd entries that are not declared in zot_auth_users
+  ansible.builtin.copy:
+    content: "{{ zot_htpasswd_kept_lines | join('\n') }}\n"
+    dest: "{{ zot_auth_htpasswd_path }}"
+    owner: root
+    group: "{{ zot_group }}"
+    mode: "{{ zot_auth_htpasswd_mode }}"
+    backup: true
+  vars:
+    zot_htpasswd_all_lines: "{{ (zot_htpasswd_slurp.content | default('') | b64decode).splitlines() }}"
+    zot_htpasswd_kept_lines: >-
+      {{ zot_htpasswd_all_lines
+         | reject('search', '^(' ~ (zot_auth_users | map(attribute='name') | map('regex_escape') | join('|')) ~ '):')
+         | list }}
+  when:
+    - zot_auth_purge_other_users | bool
+    - zot_auth_users | length > 0
+    - (zot_htpasswd_all_lines | length) != (zot_htpasswd_kept_lines | length)
+  notify: Restart zot
+
+# -----------------------------------------------------------------------------
+# Alternative: copy a pre-built htpasswd file from the controller (no passlib
+# and no extra collection required).
+# -----------------------------------------------------------------------------
+- name: Copy a pre-built htpasswd file from the control node
+  ansible.builtin.copy:
+    src: "{{ zot_auth_htpasswd_local_file }}"
+    dest: "{{ zot_auth_htpasswd_path }}"
+    owner: root
+    group: "{{ zot_group }}"
+    mode: "{{ zot_auth_htpasswd_mode }}"
+    backup: true
+  when: zot_auth_htpasswd_local_file | length > 0
+  notify: Restart zot
+
+- name: Ensure htpasswd permissions
+  ansible.builtin.file:
+    path: "{{ zot_auth_htpasswd_path }}"
+    state: file
+    owner: root
+    group: "{{ zot_group }}"
+    mode: "{{ zot_auth_htpasswd_mode }}"

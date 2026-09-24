@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# Post-install verification: the service is active and the HTTP endpoint answers.
+# =============================================================================
+
+- name: Check the systemd unit state
+  ansible.builtin.command:
+    cmd: "systemctl is-active {{ zot_service_name }}"
+  register: zot_unit_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: zot_service_state == 'started'
+
+- name: Fail when the zot unit is not running
+  ansible.builtin.assert:
+    that:
+      - zot_unit_state.stdout | default('') | trim == 'active'
+    fail_msg: >-
+      Unit {{ zot_service_name }} is not active (is-active = "{{
+      zot_unit_state.stdout | default('') | trim }}"). Check the logs:
+      journalctl -u {{ zot_service_name }} -n 100 --no-pager
+      and the configuration: {{ zot_binary_dest }} verify {{ zot_config_file }}
+    quiet: true
+  when: zot_service_state == 'started'
+
+- name: Wait for the zot HTTP endpoint to answer
+  ansible.builtin.uri:
+    url: "http://{{ zot_health_check_target }}:{{ zot_http_port }}{{ zot_health_check_path }}"
+    status_code: [200, 401]
+    timeout: "{{ zot_health_check_timeout }}"
+    return_content: false
+  register: zot_health_result
+  until: (zot_health_result.status | default(0)) in [200, 401]
+  retries: "{{ zot_health_check_retries }}"
+  delay: "{{ zot_health_check_delay }}"
+  changed_when: false
+  when:
+    - zot_service_state == 'started'
+    - zot_health_check_enabled | bool
+
+- name: Show the zot installation summary
+  ansible.builtin.debug:
+    msg:
+      - "zot binary    : {{ zot_binary_dest }} ({{ zot_binary_variant }}, v{{ zot_version_clean }})"
+      - "zot config    : {{ zot_config_file }}"
+      - "Registry data : {{ zot_data_dir }}"
+      - "Logs          : {{ (zot_log_output == 'file') | ternary(zot_log_file, 'journalctl -u ' ~ zot_service_name) }}"
+      - "HTTP endpoint : http://{{ zot_http_address }}:{{ zot_http_port }} (realm={{ zot_http_realm }})"
+      - "Auth          : {{ zot_auth_enabled | bool | ternary('htpasswd (' ~ zot_auth_htpasswd_path ~ ')', 'DISABLED - trusted networks only') }}"
+      - >-
+        Extensions    : search={{ zot_extensions_search }} ui={{ zot_extensions_ui }}
+        metrics={{ zot_extensions_metrics }} sync={{ zot_extensions_sync }}
+        scrub={{ zot_extensions_scrub }}
+      - "Registry URL  : {{ zot_registry_url }}"
+      - "Test push     : docker tag alpine {{ zot_registry_url }}/alpine:test && docker push {{ zot_registry_url }}/alpine:test"
+      - "Check catalog : curl -s {{ zot_registry_url }}/v2/_catalog"
+  vars:
+    zot_registry_url: >-
+      {{ (zot_http_address in ['0.0.0.0', '::', '[::]'])
+         | ternary(ansible_default_ipv4.address | default('REGISTRY_HOST'), zot_http_address) }}:{{ zot_http_port }}
+  when: zot_show_summary | bool

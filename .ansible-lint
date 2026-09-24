@@ -1,0 +1,21 @@
+---
+# ansible-lint configuration. Run: ansible-lint
+profile: production
+
+exclude_paths:
+  - .cache/
+  - .tmp/
+  - files/
+
+skip_list:
+  # Long URLs/templates; the length is already controlled by yamllint (max 200).
+  - yaml[line-length]
+  # `command` is used deliberately for `zot verify`, `systemctl is-active` and `sysctl --system`.
+  - command-instead-of-module
+  # `zot verify` is read-only and already sets changed_when: false.
+  - no-changed-when
+  # A few system configuration files keep the mode shipped by the package.
+  - risky-file-permissions
+
+warn_list:
+  - experimental

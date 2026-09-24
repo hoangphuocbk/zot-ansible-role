@@ -1,0 +1,94 @@
+---
+# =============================================================================
+# Internal constants for the zot role. Do NOT override these here - use
+# defaults/main.yml (or the playbook) instead. Role vars win over play vars.
+# =============================================================================
+
+# Normalise the requested version: accept both "2.1.21" and "v2.1.21".
+zot_version_clean: "{{ zot_version | string | regex_replace('^[vV]', '') }}"
+
+# Map ansible_architecture -> upstream release asset architecture.
+zot_arch_map:
+  x86_64: amd64
+  amd64: amd64
+  i386: "386"
+  i686: "386"
+  aarch64: arm64
+  arm64: arm64
+  armv7l: arm
+  ppc64le: ppc64le
+  s390x: s390x
+
+# Map the requested binary variant -> upstream release asset suffix.
+# "full" ships every extension (search, sync, scrub, metrics, ui, trust, lint).
+# "minimal" ignores the extensions section of the configuration file.
+zot_variant_suffix_map:
+  full: ""
+  minimal: "-minimal"
+  debug: "-debug"
+
+zot_distribution_spec_version: "1.1.1"
+
+zot_systemd_unit_dir: /etc/systemd/system
+zot_logrotate_dir: /etc/logrotate.d
+zot_sysctl_dir: /etc/sysctl.d
+
+zot_supported_binary_sources:
+  - url
+  - local
+
+zot_supported_binary_variants:
+  - full
+  - minimal
+  - debug
+
+zot_supported_log_levels:
+  - debug
+  - info
+  - warn
+  - error
+
+zot_supported_log_outputs:
+  - journald
+  - file
+
+# -----------------------------------------------------------------------------
+# Computed values (no need to override - use the variables in defaults/main.yml)
+# -----------------------------------------------------------------------------
+zot_service_unit_path: "{{ zot_systemd_unit_dir }}/{{ zot_service_name }}.service"
+zot_logrotate_file: "{{ zot_logrotate_dir }}/{{ zot_service_name }}"
+zot_sysctl_file: "{{ zot_sysctl_dir }}/90-{{ zot_service_name }}.conf"
+
+# Normalise checksums: accept both "sha256:<hex>" and "<hex>".
+# Uses a Jinja if/else expression (lazy) instead of the ternary filter, which
+# evaluates both branches.
+zot_binary_checksum_normalized: >-
+  {{ (zot_binary_checksum if ':' in zot_binary_checksum else 'sha256:' ~ zot_binary_checksum)
+     if (zot_binary_checksum | length > 0) else '' }}
+zot_local_binary_checksum_normalized: >-
+  {{ (zot_local_binary_checksum if ':' in zot_local_binary_checksum
+      else 'sha256:' ~ zot_local_binary_checksum)
+     if (zot_local_binary_checksum | length > 0) else '' }}
+
+# Directories the service is allowed to write to when ProtectSystem=strict is on.
+zot_systemd_read_write_paths: >-
+  {{ ([zot_data_dir]
+      + ([zot_log_file | dirname] if zot_log_output == 'file' else [])
+      + ([zot_log_audit_file | dirname] if (zot_log_audit_file | length > 0) else [])
+      + (zot_systemd_extra_read_write_paths | default([]))) | unique | list }}
+
+# Are any extensions requested? (used to warn when the "minimal" binary is used)
+zot_extensions_requested: >-
+  {{ (zot_extensions_search | bool or zot_extensions_ui | bool
+      or zot_extensions_metrics | bool or zot_extensions_scrub | bool
+      or zot_extensions_lint | bool or zot_extensions_trust | bool
+      or zot_extensions_sync | bool or zot_extensions_events | bool
+      or (zot_extensions_extra | default({}) | length > 0)) | bool }}
+
+# Address used by the post-install health check.
+# - zot_health_check_address set -> use it as-is.
+# - zot binds 0.0.0.0/:: -> check through 127.0.0.1.
+# - zot binds a specific IP -> check that exact IP (avoids a false negative).
+zot_health_check_target: >-
+  {{ zot_health_check_address if (zot_health_check_address | length > 0)
+     else ('127.0.0.1' if zot_http_address in ['0.0.0.0', '::', '[::]'] else zot_http_address) }}
