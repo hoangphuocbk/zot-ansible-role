@@ -1,0 +1,65 @@
+---
+# =============================================================================
+#  Online test: install zot by downloading the binary from the Internet.
+#
+#  Covers the "url" binary source plus htpasswd auth (community.general),
+#  journald logging, metrics and GC/dedupe.
+#
+#  Usage:
+#    ansible-playbook -i tests/inventory.yaml tests/install-zot-online.yaml
+#    ansible-playbook -i tests/inventory.yaml tests/install-zot-online.yaml --check --diff
+#  Requirements: sudo access, Ubuntu 24.04, Internet access on the target.
+# =============================================================================
+
+- name: "Online - install zot from a release URL (port 5001)"
+  hosts: zot-dev
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Include Zot Ansible role
+      include_role:
+        name: ../roles/zot
+
+  vars:
+    zot_version: "2.1.21"
+    zot_binary_variant: full
+    zot_binary_source: url
+    zot_verify_checksum: true
+
+    zot_service_name: zot-test
+    zot_http_address: "10.0.20.21" # no need to expose the test instance
+    zot_http_port: 5001
+    zot_http_realm: zot-test-url
+    zot_http_compat: ["docker2s2"]
+
+    zot_config_dir: /etc/zot-test
+    zot_data_dir: /var/lib/zot-test
+    zot_log_dir: /var/log/zot-test
+    zot_log_output: journald
+    zot_log_level: info
+
+    zot_auth_enabled: true
+    zot_auth_fail_delay: 1
+    zot_auth_users:
+      - {name: admin, password: "testpass"}
+      - {name: ci, password: "cipass"}
+    zot_auth_purge_other_users: true
+
+    zot_storage_dedupe: true
+    zot_storage_gc: true
+    zot_storage_gc_delay: "30m"
+    zot_storage_gc_interval: "2h"
+
+    zot_extensions_search: true
+    zot_extensions_search_cve: false
+    zot_extensions_ui: true
+    zot_extensions_metrics: true
+    zot_extensions_scrub: true
+
+    zot_manage_sysctl: false
+    zot_manage_firewall: false
+
+    zot_health_check_retries: 20
+    zot_health_check_delay: 3
+    zot_show_summary: true

@@ -1,0 +1,96 @@
+---
+# =============================================================================
+#  Air-gap test: install zot from a binary that is already present on the
+#  Ansible controller (no Internet access required on the target).
+#
+#  Covers the "local" binary source plus file logging + logrotate,
+#  a pre-built htpasswd file and local checksum verification.
+#
+#  Put the zot binary on the controller and pass its path, for example:
+#    ansible-playbook -i tests/inventory.yaml tests/install-zot-airgap.yaml \
+#      -e zot_test_local_binary=/path/on/controller/zot-linux-amd64
+#
+#  If `zot_test_local_binary` is not given, /tmp/zot-test-local-binary is used
+#  and must already exist.
+#  Usage:
+#    ansible-playbook -i tests/inventory.yaml tests/install-zot-airgap.yaml
+#    ansible-playbook -i tests/inventory.yaml tests/install-zot-airgap.yaml --check --diff
+#  Requirements: sudo access, Ubuntu 24.04.
+# =============================================================================
+
+- name: "Air-gap - install zot from a pre-downloaded local binary (port 5002)"
+  hosts: zot-dev
+  become: true
+  gather_facts: true
+
+  vars:
+    zot_version: "2.1.21"
+    zot_binary_variant: full
+    zot_binary_source: local
+    # Path on the Ansible controller (the machine running ansible-playbook).
+    zot_local_binary_path: "{{ zot_test_local_binary | default('/tmp/zot-test-local-binary') }}"
+
+    zot_service_name: zot-test-local
+    zot_http_address: "0.0.0.0"
+    zot_http_port: 5002
+    zot_http_realm: zot-test-local
+
+    zot_config_dir: /etc/zot-test-local
+    zot_data_dir: /var/lib/zot-test-local
+    zot_log_dir: /var/log/zot-test-local
+    zot_log_output: file
+    zot_log_level: debug
+    zot_manage_logrotate: true
+
+    zot_auth_enabled: true
+    zot_auth_htpasswd_local_file: /tmp/zot-test-htpasswd
+
+    zot_extensions_search: true
+    zot_extensions_ui: false
+    zot_extensions_scrub: true
+
+    zot_health_check_retries: 20
+    zot_health_check_delay: 3
+    zot_show_summary: true
+
+  pre_tasks:
+    - name: Check that the pre-downloaded binary exists on the controller
+      ansible.builtin.stat:
+        path: "{{ zot_local_binary_path }}"
+      register: zot_test_local_binary_stat
+      delegate_to: localhost
+      become: false
+
+    - name: Fail with guidance when the pre-downloaded binary is missing
+      ansible.builtin.fail:
+        msg: >-
+          Air-gap test needs a zot binary on the controller at
+          "{{ zot_local_binary_path }}". Download it once on a machine with
+          Internet access and re-run with
+          `-e zot_test_local_binary=/path/to/zot-linux-amd64`.
+      when: not (zot_test_local_binary_stat.stat.exists | default(false))
+
+    - name: Compute the sha256 of the local binary (tests local checksum verification)
+      ansible.builtin.command:
+        cmd: "sha256sum {{ zot_local_binary_path }}"
+      register: zot_test_local_sha
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Pass the computed checksum to the role
+      ansible.builtin.set_fact:
+        zot_local_binary_checksum: "sha256:{{ (zot_test_local_sha.stdout).split()[0] }}"
+
+    - name: Create a pre-built htpasswd file on the controller (user test / password testpass)
+      ansible.builtin.copy:
+        content: "test:$2b$10$PUZ2zFYH65Ypn3EAOVvTF.Xs5WA91vrYMfycEleqkwOcLbr2BrWrS\n"
+        dest: "{{ zot_auth_htpasswd_local_file }}"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+
+  tasks:
+    - name: Include Zot Ansible role
+      include_role:
+        name: ../roles/zot

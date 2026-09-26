@@ -271,7 +271,7 @@ The table below is generated from [`roles/zot/defaults/main.yml`](../roles/zot/d
 | `zot_data_dir` | `/var/lib/zot` | storage directory (holds images and blobs) |
 | `zot_log_dir` | `/var/log/zot` | System account and directories |
 | `zot_http_address` | `"0.0.0.0"` | tighten to an internal IP (e.g. 10.0.0.10) if desired |
-| `zot_http_port` | `5000` | unprivileged port (>= 1024); the service runs as a non-root user |
+| `zot_http_port` | `5000` | unprivileged port (1024-65535); privileged ports (< 1024) are not supported |
 | `zot_http_realm` | `zot` | HTTP (plain HTTP only - internal use; terminate TLS on a reverse proxy) |
 | `zot_http_external_url` | `""` | e.g. "http://registry.internal:5000" |
 | `zot_http_read_timeout` | `""` | e.g. "60s" (empty = zot default) |

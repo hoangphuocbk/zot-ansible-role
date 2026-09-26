@@ -21,7 +21,7 @@ and [Configuring zot](https://zotregistry.dev/v2.1.21/admin-guide/admin-configur
 | Storage | Configurable `rootDirectory`, dedupe, garbage collection (`gcDelay`/`gcInterval`/`gcTimeWindow`), `commit`, `maxRepos`, retention policies, S3/GCS passthrough |
 | Extensions | search (+CVE/Trivy), ui, metrics (Prometheus), scrub, lint, trust (cosign/notation), sync/mirror (pull-through cache), events |
 | Operations | `zot verify` before writing the config (validated inside `template`), HTTP health check after start, logrotate when logging to file, `backup` of config/binary, idempotent (re-runs report `changed=0`) |
-| Quality | `ansible-lint` (production profile), `yamllint`, test playbook running on localhost, GitHub Actions CI |
+| Quality | `ansible-lint` (production profile), `yamllint`, test playbook running on localhost |
 
 ---
 
@@ -57,8 +57,9 @@ and [Configuring zot](https://zotregistry.dev/v2.1.21/admin-guide/admin-configur
 ├── group_vars/all/vault.yml.example
 ├── docs/OPERATIONS.md           # day-2 operations: upgrade, backup, troubleshoot, uninstall
 ├── tests/
-│   ├── inventory
-│   └── localhost-test.yml       # test the role on the machine running ansible (CI)
+│   ├── inventory.yaml
+│   ├── install-zot-online.yaml          # test: download the binary from the Internet
+│   └── install-zot-airgap.yaml          # test: install a pre-downloaded local binary
 └── roles/zot/
     ├── defaults/main.yml        # all configuration variables (fully commented)
     ├── vars/main.yml            # internal constants + computed values
@@ -103,12 +104,26 @@ Run it right away on the local machine (test VM) without editing the inventory:
 ansible-playbook -i inventory.ini install-zot.yml -e zot_target_hosts=zot_servers_test
 ```
 
-Test the whole role the way CI does (2 scenarios: Play 1 installs from the URL source; Play 2 covers
-the local binary, file logging, logrotate and a pre-built htpasswd):
+Two test playbooks are provided:
 
-```bash
-ansible-playbook -i tests/inventory tests/localhost-test.yml
-```
+* **Online** — downloads the binary from the release URL (htpasswd auth, journald,
+  metrics, GC/dedupe):
+
+  ```bash
+  ansible-playbook -i tests/inventory.yaml tests/install-zot-online.yaml
+  ```
+
+* **Air-gap** — installs a binary that is already present on the controller (no
+  Internet on the target; file logging, logrotate, pre-built htpasswd, local
+  checksum verification). Pass the path with `-e zot_test_local_binary=...`
+  (defaults to `/tmp/zot-test-local-binary`):
+
+  ```bash
+  ansible-playbook -i tests/inventory.yaml tests/install-zot-airgap.yaml \
+    -e zot_test_local_binary=/path/to/zot-linux-amd64
+  ```
+
+Both accept `--check --diff` for a dry-run.
 
 At the end of the play a summary is printed:
 
@@ -164,7 +179,7 @@ The full list grouped by category is in
 | Variable | Default |
 | --- | --- |
 | `zot_http_address` | `0.0.0.0` (consider changing it to an internal IP) |
-| `zot_http_port` | `5000` (unprivileged port, >= 1024) |
+| `zot_http_port` | `5000` (unprivileged port, 1024-65535; lower ports are rejected) |
 | `zot_http_realm` | `zot` |
 | `zot_data_dir` | `/var/lib/zot` |
 | `zot_log_dir` | `/var/log/zot` |
@@ -327,8 +342,9 @@ zot_log_level: warn
 ```
 
 The role creates the directories, sets `zot:zot 0750` permissions, adds them to the unit's
-`ReadWritePaths` and configures logrotate. `zot_http_port` must be an unprivileged port (>= 1024),
-because the service runs as a non-root user without any extra capability.
+`ReadWritePaths` and configures logrotate. `zot_http_port` must be an unprivileged port
+(1024-65535), because the service runs as a non-root user without any extra capability;
+the role rejects privileged ports (< 1024) during preflight.
 
 ---
 
@@ -356,7 +372,7 @@ zot here does **not enable TLS** (exactly as required: "HTTP only, for internal 
   `401` when auth is enabled).
 * The health check address is inferred automatically: binding `0.0.0.0`/`::` → check `127.0.0.1`;
   binding a specific IP → check that exact IP (override with `zot_health_check_address`).
-* Re-running the playbook a second time must report `changed=0` (CI checks this).
+* Re-running the playbook a second time must report `changed=0` (the test checks this).
 
 ```bash
 # manual check on the target
@@ -379,13 +395,12 @@ See [`docs/OPERATIONS.md`](docs/OPERATIONS.md): version upgrades, binary/config 
 
 ```bash
 make lint      # ansible-lint + yamllint
-make syntax    # syntax-check the playbook
-make test      # run tests/localhost-test.yml on the current machine (requires sudo)
+make syntax    # syntax-check the playbooks
+make test      # run both role tests (online + air-gap; requires sudo)
+make test-online  # run only tests/install-zot-online.yaml
+make test-airgap  # run only tests/install-zot-airgap.yaml
 make check     # dry-run the installation playbook
 ```
-
-CI (`.github/workflows/ci.yml`): lint + integration test on the `ubuntu-24.04` runner (a real install
-from both binary sources, push/pull images through the registry, idempotency check).
 
 ---
 

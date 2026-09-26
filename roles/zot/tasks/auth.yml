@@ -76,7 +76,7 @@
     zot_htpasswd_all_lines: "{{ (zot_htpasswd_slurp.content | default('') | b64decode).splitlines() }}"
     zot_htpasswd_kept_lines: >-
       {{ zot_htpasswd_all_lines
-         | reject('search', '^(' ~ (zot_auth_users | map(attribute='name') | map('regex_escape') | join('|')) ~ '):')
+         | select('search', '^(' ~ (zot_auth_users | map(attribute='name') | map('regex_escape') | join('|')) ~ '):')
          | list }}
   when:
     - zot_auth_purge_other_users | bool

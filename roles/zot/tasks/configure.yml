@@ -22,13 +22,19 @@
   register: zot_config_stat
   check_mode: false
 
+- name: Determine the expected configuration file mode
+  ansible.builtin.set_fact:
+    zot_config_mode_octal: >-
+      {{ '%04o' | format(zot_config_mode if zot_config_mode is integer
+         else zot_config_mode | int(base=8)) }}
+
 - name: Fail when the service account cannot read the configuration
   ansible.builtin.assert:
     that:
       - zot_config_stat.stat.exists
       - zot_config_stat.stat.pw_name == 'root'
       - zot_config_stat.stat.gr_name == zot_group
-      - zot_config_stat.stat.mode == ('%04o' | format(zot_config_mode | int))
+      - zot_config_stat.stat.mode == zot_config_mode_octal
     fail_msg: >-
       {{ zot_config_file }} must be root:{{ zot_group }} with mode
       {{ zot_config_mode }} so the service running as "{{ zot_user }}" can read

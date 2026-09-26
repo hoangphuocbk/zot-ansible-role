@@ -24,7 +24,6 @@
       - zot_binary_variant in zot_supported_binary_variants
       - zot_log_level in zot_supported_log_levels
       - zot_log_output in zot_supported_log_outputs
-      - zot_http_port | int > 0 and zot_http_port | int < 65536
       - zot_data_dir.startswith('/')
       - zot_log_dir.startswith('/')
       - zot_config_dir.startswith('/')
@@ -36,6 +35,17 @@
     fail_msg: >-
       Invalid role variables (see the assertion above for details).
       Check defaults/main.yml of the role.
+    quiet: true
+
+- name: Validate the HTTP port
+  ansible.builtin.assert:
+    that:
+      - zot_http_port | int >= 1024 and zot_http_port | int < 65536
+    fail_msg: >-
+      zot_http_port must be an unprivileged port between 1024 and 65535 (current:
+      {{ zot_http_port }}). The service runs as the non-root "{{ zot_user }}" user
+      with all capabilities dropped, so privileged ports (< 1024) are not supported.
+    success_msg: "HTTP port OK: {{ zot_http_port }}"
     quiet: true
 
 - name: Check that the zot binary exists on the control node (source=local)

@@ -1,0 +1,9 @@
+---
+all:
+  children:
+    zot-dev:
+      hosts:
+        node1:
+            ansible_ssh_host: 10.0.20.21
+      vars:
+        ansible_ssh_user: vagrant
